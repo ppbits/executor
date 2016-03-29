@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"syscall"
 	. "testing"
 	"time"
@@ -47,7 +48,7 @@ func (es *execSuite) TestStartWait(c *C) {
 	er, err := e.Wait(context.Background())
 	c.Assert(err, NotNil)
 	c.Assert(er, NotNil)
-	c.Assert(er.ExitStatus, Equals, uint32(15))
+	c.Assert(er.ExitStatus, Equals, 0)
 	c.Assert(er.Runtime, Not(Equals), time.Duration(0))
 }
 
@@ -55,19 +56,16 @@ func (es *execSuite) TestStdio(c *C) {
 	cmd := exec.Command("/bin/echo", "yes")
 	e := NewCapture(cmd)
 	c.Assert(e.Start(), IsNil)
-	time.Sleep(100 * time.Millisecond) // let it run a bit
-	er, _ := e.Wait(context.Background())
+	er, err := e.Wait(context.Background())
+	c.Assert(err, IsNil)
 	c.Assert(er, NotNil)
-	c.Assert(er.Stdout, Matches, "yes\n")
+	c.Assert(er.Stdout, Equals, "yes\n")
 	cmd = exec.Command("sh", "-c", "echo yes 1>&2")
 	e = NewCapture(cmd)
 	c.Assert(e.Start(), IsNil)
-	time.Sleep(100 * time.Millisecond) // let it run a bit
-	// yes runs eternally, so kill it manually.
-	c.Assert(e.command.Process.Signal(syscall.SIGTERM), IsNil)
 	er, _ = e.Wait(context.Background())
 	c.Assert(er, NotNil)
-	c.Assert(er.Stderr, Matches, "yes\n")
+	c.Assert(er.Stderr, Equals, "yes\n")
 
 	cmd = exec.Command("/bin/echo", "yes")
 	e = NewIO(cmd)
@@ -89,9 +87,16 @@ func (es *execSuite) TestStdio(c *C) {
 	e = NewCapture(cmd)
 	e.Stdin = bytes.NewBufferString("foo")
 	c.Assert(e.Start(), IsNil)
-	er, err := e.Wait(context.Background())
+	er, err = e.Wait(context.Background())
 	c.Assert(err, IsNil)
 	c.Assert(er.Stdout, Equals, "foo")
+
+	cmd = exec.Command("sh", "-c", "for i in $(seq 0 1000); do echo $i; done")
+	e = NewCapture(cmd)
+	c.Assert(e.Start(), IsNil)
+	er, err = e.Wait(context.Background())
+	c.Assert(err, IsNil)
+	c.Assert(len(strings.Split(er.Stdout, "\n")), Equals, 1002)
 }
 
 func (es *execSuite) TestTimeout(c *C) {
@@ -106,8 +111,7 @@ func (es *execSuite) TestTimeout(c *C) {
 	ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
 	er, err := e.Wait(ctx)
 	c.Assert(results[0], Equals, "Command %v terminated due to timeout or cancellation. It may not have finished!")
-	c.Assert(err, NotNil)
-	c.Assert(er.ExitStatus, Not(Equals), 0)
+	c.Assert(err, Equals, context.DeadlineExceeded)
 
 	e = New(exec.Command("/bin/sleep", "2"))
 	e.LogFunc = logrus.Infof
@@ -115,7 +119,7 @@ func (es *execSuite) TestTimeout(c *C) {
 	ctx, _ = context.WithTimeout(context.Background(), 4*time.Second)
 	er, err = e.Run(ctx)
 	c.Assert(err, IsNil)
-	c.Assert(er.ExitStatus, Equals, uint32(0))
+	c.Assert(er.ExitStatus, Equals, 0)
 	time.Sleep(2 * time.Second)
 	c.Assert(len(results), Equals, 0)
 }
@@ -134,7 +138,7 @@ func (es *execSuite) TestLogger(c *C) {
 	c.Assert(e.Start(), IsNil)
 	time.Sleep(2 * time.Second)
 	er, _ := e.Wait(context.Background())
-	c.Assert(er.ExitStatus, Equals, uint32(0))
+	c.Assert(er.ExitStatus, Equals, 0)
 	c.Assert(er.Runtime > 2*time.Second, Equals, true)
 	// sometimes (depending on how long it takes to `cmd.Start()` launch) the
 	// logger will log twice and other times it will only log once. To keep the
@@ -151,7 +155,7 @@ func (es *execSuite) TestString(c *C) {
 	c.Assert(e.command.Process.Signal(syscall.SIGTERM), IsNil)
 	er, _ := e.Wait(context.Background())
 	c.Assert(er, NotNil)
-	c.Assert(er.ExitStatus, Equals, uint32(15))
+	c.Assert(er.ExitStatus, Equals, 0)
 }
 
 func (es *execSuite) TestCancel(c *C) {
@@ -180,4 +184,22 @@ func (es *execSuite) TestCancel(c *C) {
 	c.Assert(err, NotNil)
 	c.Assert(err, Equals, context.Canceled)
 	c.Assert(results[0], Equals, "Command %v terminated due to timeout or cancellation. It may not have finished!")
+}
+
+func (es *execSuite) TestError(c *C) {
+	e := New(exec.Command("sh", "-c", "exit 2"))
+	er, err := e.Run(context.Background())
+	c.Assert(er, NotNil)
+	c.Assert(err, NotNil)
+	c.Assert(er.ExitStatus, Equals, 2)
+	_, ok := err.(*exec.ExitError)
+	c.Assert(ok, Equals, true)
+
+	e = New(exec.Command("sh", "-c", "exit 28"))
+	er, err = e.Run(context.Background())
+	c.Assert(er, NotNil)
+	c.Assert(err, NotNil)
+	c.Assert(er.ExitStatus, Equals, 28)
+	_, ok = err.(*exec.ExitError)
+	c.Assert(ok, Equals, true)
 }
