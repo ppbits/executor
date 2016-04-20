@@ -155,7 +155,9 @@ func (e *Executor) Start() error {
 		return err
 	}
 
-	go e.logInterval()
+	if e.LogInterval > 0 {
+		go e.logInterval()
+	}
 
 	return nil
 }
