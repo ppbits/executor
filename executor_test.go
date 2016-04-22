@@ -146,6 +146,35 @@ func (es *execSuite) TestLogger(c *C) {
 	c.Assert(results[0], Equals, "%v has been running for %v")
 }
 
+func (es *execSuite) TestLoggerZeroOrNegativeLogInterval(c *C) {
+	results := []string{}
+	loggerFunc := func(s string, args ...interface{}) {
+		results = append(results, s)
+	}
+
+	cmd := exec.Command("/bin/sleep", "2")
+	e := New(cmd)
+	e.LogFunc = loggerFunc
+	e.LogInterval = 0
+	c.Assert(e.Start(), IsNil)
+	time.Sleep(2 * time.Second)
+	er, _ := e.Wait(context.Background())
+	c.Assert(er.ExitStatus, Equals, 0)
+	c.Assert(er.Runtime > 2*time.Second, Equals, true)
+	c.Assert(len(results), Equals, 0)
+
+	cmd = exec.Command("/bin/sleep", "2")
+	e = New(cmd)
+	e.LogFunc = loggerFunc
+	e.LogInterval = -1
+	c.Assert(e.Start(), IsNil)
+	time.Sleep(2 * time.Second)
+	er, _ = e.Wait(context.Background())
+	c.Assert(er.ExitStatus, Equals, 0)
+	c.Assert(er.Runtime > 2*time.Second, Equals, true)
+	c.Assert(len(results), Equals, 0)
+}
+
 func (es *execSuite) TestString(c *C) {
 	e := New(exec.Command(cmd[0], cmd[1:]...))
 	c.Assert(e.String(), Equals, "[/bin/sleep 200000000] (/bin/sleep) (pid: 0)")
