@@ -29,6 +29,7 @@
 package executor
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -75,8 +76,8 @@ type Executor struct {
 	command         *exec.Cmd
 	stdout          io.ReadCloser
 	stderr          io.ReadCloser
-	stdoutBuf       *bytes.Buffer
-	stderrBuf       *bytes.Buffer
+	stdoutBuf       bytes.Buffer
+	stderrBuf       bytes.Buffer
 	startTime       time.Time
 	terminateLogger chan struct{}
 }
@@ -111,8 +112,6 @@ func newExecutor(useIO, useCapture bool, cmd *exec.Cmd) *Executor {
 		command:         cmd,
 		stdout:          nil,
 		stderr:          nil,
-		stdoutBuf:       nil,
-		stderrBuf:       nil,
 		terminateLogger: make(chan struct{}),
 	}
 }
@@ -140,14 +139,6 @@ func (e *Executor) Start() error {
 		e.stderr, err = e.command.StderrPipe()
 		if err != nil {
 			return err
-		}
-
-		if e.capture {
-			e.stdoutBuf = new(bytes.Buffer)
-			go io.Copy(e.stdoutBuf, e.stdout)
-
-			e.stderrBuf = new(bytes.Buffer)
-			go io.Copy(e.stderrBuf, e.stderr)
 		}
 	}
 
@@ -203,7 +194,18 @@ func (e *Executor) Wait(ctx context.Context) (*ExecResult, error) {
 	var err error
 	errChan := make(chan error, 1)
 
-	go func() { errChan <- e.command.Wait() }()
+	go func() {
+		// make sure we have captured all output before we wait
+		if e.capture {
+			if _, err := bufio.NewReader(e.stdout).WriteTo(&e.stdoutBuf); err != nil {
+				e.LogFunc("error reading stdout: %v", err)
+			}
+			if _, err := bufio.NewReader(e.stderr).WriteTo(&e.stderrBuf); err != nil {
+				e.LogFunc("error reading stderr: %v", err)
+			}
+		}
+		errChan <- e.command.Wait()
+	}()
 
 	select {
 	case <-ctx.Done():
@@ -226,8 +228,8 @@ func (e *Executor) Wait(ctx context.Context) (*ExecResult, error) {
 	}
 
 	if e.capture {
-		res.Stdout = string(e.stdoutBuf.Bytes())
-		res.Stderr = string(e.stderrBuf.Bytes())
+		res.Stdout = e.stdoutBuf.String()
+		res.Stderr = e.stderrBuf.String()
 	}
 
 	res.Runtime = e.TimeRunning()
