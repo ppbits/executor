@@ -39,7 +39,7 @@ import (
 
 	"golang.org/x/net/context"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 // ExecResult is the result of a Wait() operation and contains various fields
