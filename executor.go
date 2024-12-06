@@ -223,7 +223,7 @@ func (e *Executor) Wait(ctx context.Context) (*ExecResult, error) {
 
 	if err != nil {
 		if exit, ok := err.(*exec.ExitError); ok {
-			res.ExitStatus = int(exit.ProcessState.Sys().(syscall.WaitStatus) / 256)
+			res.ExitStatus = exit.ProcessState.Sys().(syscall.WaitStatus).ExitStatus()
 		}
 	}
 
